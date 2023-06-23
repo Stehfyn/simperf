@@ -1,2 +1,2 @@
-# simprof
-A simple header-only C++ profiler
+# simperf
+A simple C++ profiler
