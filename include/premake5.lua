@@ -26,7 +26,7 @@ project "simperf"
     targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
     objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
    
-    filter "toolset:msc"
+    filter "toolset:msc-v143"
         defines { "SP_TOOLSET_MSC" }
 
     filter "configurations:Debug"
