@@ -26,9 +26,6 @@ project "tests"
 
     targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
     objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
-   
-    filter "toolset:msc"
-        defines { "SP_TOOLSET_MSC" }
 
     filter "configurations:Debug"
         defines { "SP_TESTS_DEBUG" }

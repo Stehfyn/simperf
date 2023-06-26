@@ -1,3 +1,8 @@
+// Uncomment to force enable simperf in release
+//#if !defined(_DEBUG)
+//	#define SIMPERF_ENABLE
+//#endif
+
 #include "../include/simperf.hpp"
 
 #define CORE_TRACE(...)		   SIMPERF_TRACE("core", __VA_ARGS__)
@@ -24,8 +29,10 @@ void register_static_example(const std::vector<spdlog::sink_ptr>& sinks)
 	core->set_level(spdlog::level::trace);
 	core->flush_on(spdlog::level::trace);
 
-	assert(simperf::Log::RegisterStatic({ core, client }) == simperf::register_result::ok);
-	
+	SIMPERF_ASSERT(simperf::Log::RegisterStatic({ core, client }) == simperf::register_result::ok);
+	simperf::Log::SetErrorLogger("core");
+	simperf::Log::SetDebugLogger("core");
+
 	int x = 0;
 	CORE_TRACE("hi from core {0}", x);
 	CORE_DEBUG("hi from core {0}", x);
@@ -37,20 +44,30 @@ void register_static_example(const std::vector<spdlog::sink_ptr>& sinks)
 
 void register_dynamic_example(const std::vector<spdlog::sink_ptr>& sinks)
 {
-	std::shared_ptr<spdlog::logger> dynamic = std::make_shared<spdlog::logger>("dynamic", std::begin(sinks), std::end(sinks));
+	SIMPERF_PROFILE_FUNCTION("register_dynamic_example");
+	{
+		SIMPERF_PROFILE_SCOPE("dynamic register");
+		std::shared_ptr<spdlog::logger> dynamic = std::make_shared<spdlog::logger>("dynamic", std::begin(sinks), std::end(sinks));
 
-	dynamic->set_level(spdlog::level::trace);
-	dynamic->flush_on(spdlog::level::trace);
+		dynamic->set_level(spdlog::level::trace);
+		dynamic->flush_on(spdlog::level::trace);
 
-	assert(simperf::Log::RegisterDynamic(dynamic) == simperf::register_result::ok);
+		SIMPERF_ASSERT(simperf::Log::RegisterDynamic(dynamic) == simperf::register_result::ok, "dynamic logger failed to register");
+	}
 
 	int x = 1;
 	SIMPERF_TRACE("dynamic", "hi from dynamic {0}", x);
+	SIMPERF_DEBUG("dynamic", "hi from dynamic {0}", x);
+	SIMPERF_INFO("dynamic", "hi from dynamic {0}", x);
+	SIMPERF_WARN("dynamic", "hi from dynamic {0}", x);
+	SIMPERF_ERROR("dynamic", "hi from dynamic {0}", x);
+	SIMPERF_CRITICAL("dynamic", "hi from dynamic {0}", x);
 
 }
 
 int main()
 {
+	SIMPERF_PROFILE_BEGIN_SESSION("test", "simperf-test.json");
 	std::vector<spdlog::sink_ptr> sinks;
 	make_sinks(sinks);
 

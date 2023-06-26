@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
+#include <filesystem>
 
 #ifdef SIMPERF_LIB
 #include <spdlog/spdlog.h>
@@ -22,6 +23,30 @@
 
 namespace simperf
 {
+#if _WIN64
+	#define SIMPERF_DEBUGBREAK() __debugbreak()
+#elif defined(__linux__)
+	#include <signal.h>
+	#define SIMPERF_DEBUGBREAK() raise(SIGTRAP)
+#endif
+
+#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+	#define SIMPERF_EXPAND_MACRO(x) x
+	#define SIMPERF_STRINGIFY_MACRO(x) #x
+
+	//need to attach with default error logger
+	#define SIMPERF_INTERNAL_ASSERT_IMPL(type, check, msg, ...) { if(!(check)) { SIMPERF_LOG_ASSERT(msg, __VA_ARGS__); SIMPERF_DEBUGBREAK(); } }
+	#define SIMPERF_INTERNAL_ASSERT_WITH_MSG(type, check, ...) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion failed: {0}", __VA_ARGS__)
+	#define SIMPERF_INTERNAL_ASSERT_NO_MSG(type, check) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}", SIMPERF_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__)
+
+	#define SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(arg1, arg2, macro, ...) macro
+	#define SIMPERF_INTERNAL_ASSERT_GET_MACRO(...) SIMPERF_EXPAND_MACRO( SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, SIMPERF_INTERNAL_ASSERT_WITH_MSG, SIMPERF_INTERNAL_ASSERT_NO_MSG) )
+
+	#define SIMPERF_ASSERT(...) SIMPERF_EXPAND_MACRO(SIMPERF_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_, __VA_ARGS__) )
+#else
+	#define SIMPERF_ASSERT(...) 
+#endif
+
 	typedef std::shared_ptr<spdlog::logger> logger;
 
 	typedef std::vector<std::shared_ptr<spdlog::logger>> log_list;
@@ -52,6 +77,12 @@ namespace simperf
 							return register_result::failed;
 						}
 						else {
+							if (s_DebugLogger.empty()) {
+								s_DebugLogger = logger->name();
+							}
+							if (s_ErrorLogger.empty()) {
+								s_ErrorLogger = logger->name();
+							}
 							s_StaticLoggerRegistry.insert({ logger->name(), logger });
 						}
 					}
@@ -82,6 +113,28 @@ namespace simperf
 			return found == s_StaticLoggerRegistry.end() ? spdlog::get(logger_name) : found->second;
 		}
 
+		static void SetDebugLogger(const std::string& logger_name) {
+			auto found = s_StaticLoggerRegistry.find(logger_name);
+			if (found != s_StaticLoggerRegistry.end()) {
+				s_DebugLogger = logger_name;
+			}
+		}
+
+		static void SetErrorLogger(const std::string& logger_name) {
+			auto found = s_StaticLoggerRegistry.find(logger_name);
+			if (found != s_StaticLoggerRegistry.end()) {
+				s_ErrorLogger = logger_name;
+			}
+		}
+
+		static std::string GetDebugLoggerName(void) {
+			return s_DebugLogger;
+		}
+
+		static std::string GetErrorLoggerName(void) {
+			return s_ErrorLogger;
+		}
+
 	private:
 		static register_result RegisterLogger(const logger& logger_) {
 			try {
@@ -95,6 +148,8 @@ namespace simperf
 		}
 
 	private:
+		inline static std::string s_DebugLogger;
+		inline static std::string s_ErrorLogger;
 		inline static std::mutex s_RegisterLock;
 		inline static std::atomic_bool s_StaticRegistryInitialized;
 		inline static std::unordered_map<std::string, logger> s_StaticLoggerRegistry;
@@ -103,22 +158,38 @@ namespace simperf
 #define SIMPERF_LOG_IT_(logger_name, log_level, ...)  \
 	{ \
 		simperf::logger logger_ = simperf::Log::GetLogger(logger_name); \
-		logger_ == nullptr ? void(0) : \
+		logger_ == nullptr ? ((void)0) : \
 		log_level == ::spdlog::level::trace ? logger_->trace(__VA_ARGS__) : \
 		log_level == ::spdlog::level::debug ? logger_->debug(__VA_ARGS__) : \
 		log_level == ::spdlog::level::info ? logger_->info(__VA_ARGS__) : \
 		log_level == ::spdlog::level::warn ? logger_->warn(__VA_ARGS__) : \
 		log_level == ::spdlog::level::err ? logger_->error(__VA_ARGS__) : \
 		log_level == ::spdlog::level::critical ? logger_->critical(__VA_ARGS__) : \
-		void(0); \
+		((void)0); \
 	}
 
-#define SIMPERF_TRACE(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::trace, __VA_ARGS__)
-#define SIMPERF_DEBUG(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::debug, __VA_ARGS__)
-#define SIMPERF_INFO(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::info, __VA_ARGS__)
-#define SIMPERF_WARN(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::warn, __VA_ARGS__)
-#define SIMPERF_ERROR(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::err, __VA_ARGS__)
-#define SIMPERF_CRITICAL(logger_name, ...)  SIMPERF_LOG_IT_(logger_name, spdlog::level::critical, __VA_ARGS__)
+#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+	#define SIMPERF_TRACE(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::trace, __VA_ARGS__)
+	#define SIMPERF_DEBUG(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::debug, __VA_ARGS__)
+	#define SIMPERF_INFO(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::info, __VA_ARGS__)
+	#define SIMPERF_WARN(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::warn, __VA_ARGS__)
+	#define SIMPERF_ERROR(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::err, __VA_ARGS__)
+	#define SIMPERF_CRITICAL(logger_name, ...)  SIMPERF_LOG_IT_(logger_name, spdlog::level::critical, __VA_ARGS__)
+
+	#define SIMPERF_LOG_PROFILE(...)			SIMPERF_DEBUG(::simperf::Log::GetDebugLoggerName(), __VA_ARGS__)
+	#define SIMPERF_LOG_ASSERT(...)             SIMPERF_ERROR(::simperf::Log::GetErrorLoggerName(), __VA_ARGS__)
+#else
+	#define SIMPERF_TRACE(logger_name, ...)   
+	#define SIMPERF_DEBUG(logger_name, ...)   
+	#define SIMPERF_INFO(logger_name, ...)    
+	#define SIMPERF_WARN(logger_name, ...)    
+	#define SIMPERF_ERROR(logger_name, ...)   
+	#define SIMPERF_CRITICAL(logger_name, ...)
+	#define SIMPERF_LOG_ASSERT(...)
+
+	#define SIMPERF_LOG_PROFILE(...)
+	#define SIMPERF_LOG_ASSERT(...) 
+#endif
 
 	using FloatingPointMicroseconds = std::chrono::duration<double, std::micro>;
 
@@ -269,8 +340,8 @@ namespace simperf
 			auto highResStart = FloatingPointMicroseconds{ m_StartTimepoint.time_since_epoch() };
 			auto elapsedTime = std::chrono::time_point_cast<std::chrono::microseconds>(endTimepoint).time_since_epoch() - std::chrono::time_point_cast<std::chrono::microseconds>(m_StartTimepoint).time_since_epoch();
 
+			SIMPERF_LOG_PROFILE("{0} on thread {1} took {2}", m_Name, std::this_thread::get_id(), elapsedTime);
 			Instrumentor::Get().WriteProfile({ m_Name, highResStart, elapsedTime, std::this_thread::get_id() });
-
 			m_Stopped = true;
 		}
 	private:
@@ -307,4 +378,39 @@ namespace simperf
 			return result;
 		}
 	}
+#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+	// Resolve which function signature macro will be used. Note that this only
+	// is resolved when the (pre)compiler starts, so the syntax highlighting
+	// could mark the wrong one in your editor!
+	#if defined(__GNUC__) || (defined(__MWERKS__) && (__MWERKS__ >= 0x3000)) || (defined(__ICC) && (__ICC >= 600)) || defined(__ghs__)
+		#define SIMPERF_FUNC_SIG __PRETTY_FUNCTION__
+	#elif defined(__DMC__) && (__DMC__ >= 0x810)
+		#define SIMPERF_FUNC_SIG __PRETTY_FUNCTION__
+	#elif (defined(__FUNCSIG__) || (_MSC_VER))
+		#define SIMPERF_FUNC_SIG __FUNCSIG__
+	#elif (defined(__INTEL_COMPILER) && (__INTEL_COMPILER >= 600)) || (defined(__IBMCPP__) && (__IBMCPP__ >= 500))
+		#define SIMPERF_FUNC_SIG __FUNCTION__
+	#elif defined(__BORLANDC__) && (__BORLANDC__ >= 0x550)
+		#define SIMPERF_FUNC_SIG __FUNC__
+	#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+		#define SIMPERF_FUNC_SIG __func__
+	#elif defined(__cplusplus) && (__cplusplus >= 201103)
+		#define SIMPERF_FUNC_SIG __func__
+	#else
+		#define SIMPERF_FUNC_SIG "SIMPERF_FUNC_SIG unknown!"
+	#endif
+
+	#define SIMPERF_PROFILE_BEGIN_SESSION(name, filepath) ::simperf::Instrumentor::Get().BeginSession(name, filepath)
+	#define SIMPERF_PROFILE_END_SESSION() ::simperf::Instrumentor::Get().EndSession()
+	#define SIMPERF_PROFILE_SCOPE_LINE2(name, line) constexpr auto fixedName##line = ::simperf::InstrumentorUtils::CleanupOutputString(name, "__cdecl ");\
+												   ::simperf::InstrumentationTimer timer##line(fixedName##line.Data)
+	#define SIMPERF_PROFILE_SCOPE_LINE(name, line) SIMPERF_PROFILE_SCOPE_LINE2(name, line)
+	#define SIMPERF_PROFILE_SCOPE(name) SIMPERF_PROFILE_SCOPE_LINE(name, __LINE__)
+	#define SIMPERF_PROFILE_FUNCTION() SIMPERF_PROFILE_SCOPE(SIMPERF_FUNC_SIG)
+#else
+	#define SIMPERF_PROFILE_BEGIN_SESSION(name, filepath)
+	#define SIMPERF_PROFILE_END_SESSION()
+	#define SIMPERF_PROFILE_SCOPE(name)
+	#define SIMPERF_PROFILE_FUNCTION()
+#endif
 }
