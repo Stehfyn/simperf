@@ -1,14 +1,24 @@
+#pragma once
+
 #include <atomic>
 #include <mutex>
 #include <memory>
 #include <string>
 #include <iostream>
+#include <sstream>
 #include <unordered_map>
 
+#ifdef SIMPERF_LIB
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ostr.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#else
+#include <../external/spdlog/include/spdlog/spdlog.h>
+#include <../external/spdlog/include/spdlog/fmt/ostr.h>
+#include <../external/spdlog/include/spdlog/sinks/basic_file_sink.h>
+#include <../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h>
+#endif
 
 namespace simperf
 {
@@ -30,22 +40,8 @@ namespace simperf
 		return os;
 	}
 
-	template<typename T>
-	using Ref = std::shared_ptr<T>;
-	template<typename T, typename ... Args>
-
-	constexpr Ref<T> CreateRef(Args&& ... args)
-	{
-		return std::make_shared<T>(std::forward<Args>(args)...);
-	}
-
 	class Log {
 	public:
-		enum class type {
-			static_logger,
-			dynamic_logger
-		};
-
 		static register_result RegisterStatic(const log_list& log_list_) {
 			if (!s_StaticRegistryInitialized.load(std::memory_order_acquire)) {
 				std::unique_lock<std::mutex> guard(s_RegisterLock);
@@ -64,41 +60,32 @@ namespace simperf
 			return register_result::ok;
 		}
 
-		static register_result RegisterDynamic(const log_list& log_list_) {
-			for (const auto& log_spec : log_list_) {
-				auto result = RegisterLogger(log_spec);
-				if (!result) {
-					return register_result::failed;
-				}
+		static register_result RegisterDynamic(const logger& logger_) {
+			auto result = RegisterLogger(logger_);
+			if (!result) {
+				return register_result::failed;
 			}
 			return register_result::ok;
 		}
 
-		static void Unregister(const std::string& name, const type& logger_type) {
-			if (logger_type == ::simperf::Log::type::static_logger) {
-				if (s_StaticLoggerRegistry.erase(name)) {
-					spdlog::drop(name);
-				}
+		static void Unregister(const std::string& name) {
+			if (s_StaticLoggerRegistry.erase(name)) {
+				spdlog::drop(name);
 			}
 			else {
 				spdlog::drop(name);
 			}
 		}
 
-		static Ref<spdlog::logger> GetLogger(const std::string& logger_name, const type& logger_type) {
-			if (logger_type == type::static_logger) {
-				auto found = s_StaticLoggerRegistry.find(logger_name);
-				return found == s_StaticLoggerRegistry.end() ? nullptr : found->second;
-			}
-			else {
-				return spdlog::get(logger_name);
-			}
+		static logger GetLogger(const std::string& logger_name) {
+			auto found = s_StaticLoggerRegistry.find(logger_name);
+			return found == s_StaticLoggerRegistry.end() ? spdlog::get(logger_name) : found->second;
 		}
 
 	private:
-		static register_result RegisterLogger(const logger& log_spec) {
+		static register_result RegisterLogger(const logger& logger_) {
 			try {
-				spdlog::register_logger(log_spec);
+				spdlog::register_logger(logger_);
 				return register_result::ok;
 			}
 			catch (spdlog::spdlog_ex& e) {
@@ -110,24 +97,28 @@ namespace simperf
 	private:
 		inline static std::mutex s_RegisterLock;
 		inline static std::atomic_bool s_StaticRegistryInitialized;
-		inline static std::unordered_map<std::string, Ref<spdlog::logger>> s_StaticLoggerRegistry;
+		inline static std::unordered_map<std::string, logger> s_StaticLoggerRegistry;
 	};
 
-#define SP_LOG_IT_(logger_name, logger_type, log_level, ...)  \
+#define SIMPERF_LOG_IT_(logger_name, log_level, ...)  \
 	{ \
-		simperf::Ref<spdlog::logger> logger = simperf::Log::GetLogger(logger_name, logger_type); \
-		logger == nullptr ? void(0) : \
-		log_level == ::spdlog::level::trace ? logger->trace(__VA_ARGS__) : \
-		log_level == ::spdlog::level::debug ? logger->debug(__VA_ARGS__) : \
-		log_level == ::spdlog::level::info ? logger->info(__VA_ARGS__) : \
-		log_level == ::spdlog::level::warn ? logger->warn(__VA_ARGS__) : \
-		log_level == ::spdlog::level::err ? logger->error(__VA_ARGS__) : \
-		log_level == ::spdlog::level::critical ? logger->critical(__VA_ARGS__) : \
+		simperf::logger logger_ = simperf::Log::GetLogger(logger_name); \
+		logger_ == nullptr ? void(0) : \
+		log_level == ::spdlog::level::trace ? logger_->trace(__VA_ARGS__) : \
+		log_level == ::spdlog::level::debug ? logger_->debug(__VA_ARGS__) : \
+		log_level == ::spdlog::level::info ? logger_->info(__VA_ARGS__) : \
+		log_level == ::spdlog::level::warn ? logger_->warn(__VA_ARGS__) : \
+		log_level == ::spdlog::level::err ? logger_->error(__VA_ARGS__) : \
+		log_level == ::spdlog::level::critical ? logger_->critical(__VA_ARGS__) : \
 		void(0); \
-	} 
+	}
 
-#define SP_STATIC_LOG_(logger_name, log_level, ...) SP_LOG_IT_(logger_name, ::simperf::Log::type::static_logger, log_level, __VA_ARGS__)
-#define SP_DYNAMIC_LOG_(logger_name, log_level, ...) SP_LOG_IT_(logger_name, ::simperf::Log::type::dynamic_logger, log_level, __VA_ARGS__)
+#define SIMPERF_TRACE(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::trace, __VA_ARGS__)
+#define SIMPERF_DEBUG(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::debug, __VA_ARGS__)
+#define SIMPERF_INFO(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::info, __VA_ARGS__)
+#define SIMPERF_WARN(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::warn, __VA_ARGS__)
+#define SIMPERF_ERROR(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::err, __VA_ARGS__)
+#define SIMPERF_CRITICAL(logger_name, ...)  SIMPERF_LOG_IT_(logger_name, spdlog::level::critical, __VA_ARGS__)
 
 	using FloatingPointMicroseconds = std::chrono::duration<double, std::micro>;
 

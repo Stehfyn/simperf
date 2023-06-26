@@ -23,19 +23,22 @@ project "simperf"
         "spdlog",
     }
 
+    defines 
+    {
+        "SIMPERF_LIB"
+    }
+
     targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
     objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
    
-    filter "toolset:msc-v143"
-        defines { "SP_TOOLSET_MSC" }
 
     filter "configurations:Debug"
-        defines { "SP_DEBUG" }
+        defines { "SIMPERF_DEBUG" }
         runtime "Debug"
         symbols "On"
 
     filter "configurations:Release"
-        defines { "SP_RELEASE" }
+        defines { "SIMPERF_RELEASE" }
         runtime "Release"
         optimize "On"
         symbols "Off"
