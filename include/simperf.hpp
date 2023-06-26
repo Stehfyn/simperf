@@ -8,29 +8,37 @@
 #include <sstream>
 #include <unordered_map>
 #include <filesystem>
+#include <string>
+#include <string_view>
+#include <format>
 
-#ifdef SIMPERF_LIB
-#include <spdlog/spdlog.h>
-#include <spdlog/fmt/ostr.h>
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#if defined(SIMPERF_LIB)
+	#include <spdlog/spdlog.h>
+	#include <spdlog/common.h>
+	#include <spdlog/fmt/ostr.h>
+	#include <spdlog/sinks/basic_file_sink.h>
+	#include <spdlog/sinks/stdout_color_sinks.h>
 #else
-#include "../external/spdlog/include/spdlog/spdlog.h"
-#include "../external/spdlog/include/spdlog/fmt/ostr.h"
-#include "../external/spdlog/include/spdlog/sinks/basic_file_sink.h"
-#include "../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h"
+	#include "../external/spdlog/include/spdlog/spdlog.h"
+	#include "../external/spdlog/include/spdlog/common.h"
+	#include "../external/spdlog/include/spdlog/fmt/ostr.h"
+	#include "../external/spdlog/include/spdlog/sinks/basic_file_sink.h"
+	#include "../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h"
 #endif
 
 namespace simperf
 {
-#if _WIN64
+#if defined(_WIN64)
 	#define SIMPERF_DEBUGBREAK() __debugbreak()
 #elif defined(__linux__)
 	#include <signal.h>
 	#define SIMPERF_DEBUGBREAK() raise(SIGTRAP)
+#else
+	#include <stdlib.h>
+	#define SIMPERF_DEBUGBREAK() abort()
 #endif
 
-#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+#if (defined(_DEBUG) && !defined(SIMPERF_DISABLE)) || defined(SIMPERF_ENABLE)
 	#define SIMPERF_EXPAND_MACRO(x) x
 	#define SIMPERF_STRINGIFY_MACRO(x) #x
 
@@ -65,8 +73,22 @@ namespace simperf
 		return os;
 	}
 
+	using namespace std::string_literals;
+	using namespace std::string_view_literals;
+	constexpr inline std::string_view TestFormat = "Test {} {}."sv;
+
+	template<typename... Args>
+	std::string Format(const std::string_view message, Args... formatItems)
+	{
+		return std::vformat(message, std::make_format_args(std::forward<Args>(formatItems)...));
+	}
+
 	class Log {
 	public:
+		template<typename ... Args>
+		static void TestLog(const std::string& logger_name, const std::string_view fmt, Args&&... args) {
+			::simperf::Log::GetLogger(logger_name)->trace(simperf::Format(fmt, std::forward<Args>(args)...));
+		}
 		static register_result RegisterStatic(const log_list& log_list_) {
 			if (!s_StaticRegistryInitialized.load(std::memory_order_acquire)) {
 				std::unique_lock<std::mutex> guard(s_RegisterLock);
@@ -127,11 +149,11 @@ namespace simperf
 			}
 		}
 
-		static std::string GetDebugLoggerName(void) {
+		static const std::string& GetDebugLoggerName(void) {
 			return s_DebugLogger;
 		}
 
-		static std::string GetErrorLoggerName(void) {
+		static const std::string& GetErrorLoggerName(void) {
 			return s_ErrorLogger;
 		}
 
@@ -168,7 +190,9 @@ namespace simperf
 		((void)0); \
 	}
 
-#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+#define SIMPERF_LOG_IT__(logger_name, ...) ::simperf::Log::TestLog(logger_name, __VA_ARGS__);
+
+#if (defined(_DEBUG) && !defined(SIMPERF_DISABLE)) || defined(SIMPERF_ENABLE)
 	#define SIMPERF_TRACE(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::trace, __VA_ARGS__)
 	#define SIMPERF_DEBUG(logger_name, ...)     SIMPERF_LOG_IT_(logger_name, spdlog::level::debug, __VA_ARGS__)
 	#define SIMPERF_INFO(logger_name, ...)      SIMPERF_LOG_IT_(logger_name, spdlog::level::info, __VA_ARGS__)
@@ -378,7 +402,7 @@ namespace simperf
 			return result;
 		}
 	}
-#if (defined(_DEBUG) && !defined(_SIMPERF_DISABLE_ON_DEBUG)) || defined(SIMPERF_ENABLE)
+#if (defined(_DEBUG) && !defined(SIMPERF_DISABLE)) || defined(SIMPERF_ENABLE)
 	// Resolve which function signature macro will be used. Note that this only
 	// is resolved when the (pre)compiler starts, so the syntax highlighting
 	// could mark the wrong one in your editor!

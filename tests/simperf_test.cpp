@@ -3,6 +3,11 @@
 //	#define SIMPERF_ENABLE
 //#endif
 
+// Uncomment to force disable simperf in debug
+//#if defined(_DEBUG)
+//	#define SIMPERF_DISABLE
+//#endif
+
 #include "../include/simperf.hpp"
 
 #define CORE_TRACE(...)		   SIMPERF_TRACE("core", __VA_ARGS__)
@@ -53,8 +58,8 @@ void register_dynamic_example(const std::vector<spdlog::sink_ptr>& sinks)
 		dynamic->flush_on(spdlog::level::trace);
 
 		SIMPERF_ASSERT(simperf::Log::RegisterDynamic(dynamic) == simperf::register_result::ok, "dynamic logger failed to register");
+		//SIMPERF_LOG_IT__("dynamic", "hi from forwarded dynamic {0}", 0);
 	}
-
 	int x = 1;
 	SIMPERF_TRACE("dynamic", "hi from dynamic {0}", x);
 	SIMPERF_DEBUG("dynamic", "hi from dynamic {0}", x);
@@ -62,7 +67,6 @@ void register_dynamic_example(const std::vector<spdlog::sink_ptr>& sinks)
 	SIMPERF_WARN("dynamic", "hi from dynamic {0}", x);
 	SIMPERF_ERROR("dynamic", "hi from dynamic {0}", x);
 	SIMPERF_CRITICAL("dynamic", "hi from dynamic {0}", x);
-
 }
 
 int main()

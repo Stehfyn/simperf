@@ -28,12 +28,10 @@ project "tests"
     objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
 
     filter "configurations:Debug"
-        defines { "SP_TESTS_DEBUG" }
         runtime "Debug"
         symbols "On"
 
     filter "configurations:Release"
-        defines { "SP_TESTS_RELEASE" }
         runtime "Release"
         optimize "On"
         symbols "Off"

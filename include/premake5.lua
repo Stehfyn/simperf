@@ -31,14 +31,11 @@ project "simperf"
     targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
     objdir ("../bin-int/" .. outputdir .. "/%{prj.name}")
    
-
     filter "configurations:Debug"
-        defines { "SIMPERF_DEBUG" }
         runtime "Debug"
         symbols "On"
 
     filter "configurations:Release"
-        defines { "SIMPERF_RELEASE" }
         runtime "Release"
         optimize "On"
         symbols "Off"
