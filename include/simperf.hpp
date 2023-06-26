@@ -14,10 +14,10 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #else
-#include <../external/spdlog/include/spdlog/spdlog.h>
-#include <../external/spdlog/include/spdlog/fmt/ostr.h>
-#include <../external/spdlog/include/spdlog/sinks/basic_file_sink.h>
-#include <../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h>
+#include "../external/spdlog/include/spdlog/spdlog.h"
+#include "../external/spdlog/include/spdlog/fmt/ostr.h"
+#include "../external/spdlog/include/spdlog/sinks/basic_file_sink.h"
+#include "../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h"
 #endif
 
 namespace simperf
