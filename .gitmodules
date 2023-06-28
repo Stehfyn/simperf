@@ -2,3 +2,6 @@
 	path = external/spdlog
 	url = https://github.com/gabime/spdlog
         ignore = dirty
+[submodule "external/spdlog_setup"]
+	path = external/spdlog_setup
+	url = https://github.com/gegles/spdlog_setup

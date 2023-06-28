@@ -1,7 +1,7 @@
 // Uncomment to force enable simperf in release
-//#if !defined(_DEBUG)
-//	#define SIMPERF_ENABLE
-//#endif
+#if !defined(_DEBUG)
+	#define SIMPERF_ENABLE
+#endif
 
 // Uncomment to force disable simperf in debug
 //#if defined(_DEBUG)
@@ -19,11 +19,12 @@
 
 void make_sinks(std::vector<spdlog::sink_ptr>& sinks)
 {
-	sinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+	sinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>("yuh"));
 	sinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>("core.log", true));
 
 	sinks[0]->set_pattern("%^[%T] %n: %v%$");
 	sinks[1]->set_pattern("[%T] [%l] %n: %v");
+	//SIMPERF_ASSERT_WARGS(1 == 2);
 }
 
 void register_static_example(const std::vector<spdlog::sink_ptr>& sinks)
@@ -34,9 +35,11 @@ void register_static_example(const std::vector<spdlog::sink_ptr>& sinks)
 	core->set_level(spdlog::level::trace);
 	core->flush_on(spdlog::level::trace);
 
-	SIMPERF_ASSERT(simperf::Log::RegisterStatic({ core, client }) == simperf::register_result::ok);
+	SIMPERF_ASSERT(simperf::Log::RegisterStatic({ core, client }) == simperf::register_result::ok, "LOL LOSER");
 	simperf::Log::SetErrorLogger("core");
 	simperf::Log::SetDebugLogger("core");
+
+	::simperf::Log::LogIt("core", "{1}", 10);
 
 	int x = 0;
 	CORE_TRACE("hi from core {0}", x);
@@ -47,28 +50,6 @@ void register_static_example(const std::vector<spdlog::sink_ptr>& sinks)
 	CORE_CRITICAL("hi from core {0}", x);
 }
 
-void register_dynamic_example(const std::vector<spdlog::sink_ptr>& sinks)
-{
-	SIMPERF_PROFILE_FUNCTION("register_dynamic_example");
-	{
-		SIMPERF_PROFILE_SCOPE("dynamic register");
-		std::shared_ptr<spdlog::logger> dynamic = std::make_shared<spdlog::logger>("dynamic", std::begin(sinks), std::end(sinks));
-
-		dynamic->set_level(spdlog::level::trace);
-		dynamic->flush_on(spdlog::level::trace);
-
-		SIMPERF_ASSERT(simperf::Log::RegisterDynamic(dynamic) == simperf::register_result::ok, "dynamic logger failed to register");
-		//SIMPERF_LOG_IT__("dynamic", "hi from forwarded dynamic {0}", 0);
-	}
-	int x = 1;
-	SIMPERF_TRACE("dynamic", "hi from dynamic {0}", x);
-	SIMPERF_DEBUG("dynamic", "hi from dynamic {0}", x);
-	SIMPERF_INFO("dynamic", "hi from dynamic {0}", x);
-	SIMPERF_WARN("dynamic", "hi from dynamic {0}", x);
-	SIMPERF_ERROR("dynamic", "hi from dynamic {0}", x);
-	SIMPERF_CRITICAL("dynamic", "hi from dynamic {0}", x);
-}
-
 int main()
 {
 	SIMPERF_PROFILE_BEGIN_SESSION("test", "simperf-test.json");
@@ -76,7 +57,7 @@ int main()
 	make_sinks(sinks);
 
 	register_static_example(sinks);
-	register_dynamic_example(sinks);
 
+	std::cout << "end" << std::endl;
 	return 0;
 }

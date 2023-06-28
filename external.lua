@@ -1,6 +1,7 @@
 -- external.lua
 IncludeDir = {}
 IncludeDir["spdlog"] = "../external/spdlog/include"
+IncludeDir["spdlog_setup"] = "../external/spdlog_setup/include"
 
 group "external"
    externalproject "spdlog"

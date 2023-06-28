@@ -11,6 +11,9 @@
 #include <string>
 #include <string_view>
 #include <format>
+#include <stdexcept>
+#include <vector>
+#include <regex>
 
 #if defined(SIMPERF_LIB)
 	#include <spdlog/spdlog.h>
@@ -28,8 +31,24 @@
 
 namespace simperf
 {
+	template<typename... Args>
+	std::string Format(const std::string_view message, Args... formatItems)
+	{
+		return std::vformat(message, std::make_format_args(std::forward<Args>(formatItems)...));
+	}
+
 #if defined(_WIN64)
-	#define SIMPERF_DEBUGBREAK() __debugbreak()
+	#include <tchar.h>
+	#include <crtdbg.h>
+	#include <winuser.h>
+	#include <crtdbg.h>
+	#if !defined(_DEBUG) || defined(SIMPERF_ENABLE)
+		#define SIMPERF_INTERNAL_ASSERT_WINDOW(msg, ...) MessageBoxA(NULL, ::simperf::Format(msg, __VA_ARGS__).c_str(),  "NON-FATAL ASSERT", MB_OK | MB_ICONWARNING)
+		#define SIMPERF_DEBUGBREAK(msg, ...) SIMPERF_INTERNAL_ASSERT_WINDOW(msg, __VA_ARGS__)
+	#else
+		#define SIMPERF_INTERNAL_ASSERT_WINDOW(msg, ...) _RPTF0(_CRT_ERROR, ::simperf::Format(msg, __VA_ARGS__).c_str())
+		#define SIMPERF_DEBUGBREAK(msg, ...)  SIMPERF_INTERNAL_ASSERT_WINDOW(msg, __VA_ARGS__); __debugbreak()
+	#endif
 #elif defined(__linux__)
 	#include <signal.h>
 	#define SIMPERF_DEBUGBREAK() raise(SIGTRAP)
@@ -41,18 +60,48 @@ namespace simperf
 #if (defined(_DEBUG) && !defined(SIMPERF_DISABLE)) || defined(SIMPERF_ENABLE)
 	#define SIMPERF_EXPAND_MACRO(x) x
 	#define SIMPERF_STRINGIFY_MACRO(x) #x
-
+	#define REVERSE_STRINGIFY(str) #str[0]
+	#define SIMPERF_GEN_ID(empty, id) empty##id
+	#define SIMPERF_SPLIT_EXPR(str) \
+    [&]() -> std::vector<std::string> { \
+        std::regex re("==|!=|>=|<=|!|\\|\\||&&|&|\\^"); \
+        std::string expr{str}; \
+        std::sregex_token_iterator iter(expr.begin(), expr.end(), re, -1); \
+        std::sregex_token_iterator end; \
+        std::vector<std::string> parsed{iter, end}; \
+        std::vector<std::string> tokens; \
+        for (std::string& t : parsed) { \
+            std::string::iterator end_pos = std::remove(t.begin(), t.end(), ' '); \
+            t.erase(end_pos, t.end()); \
+            if (!t.empty()) tokens.push_back(t);\
+        } \
+        return tokens; \
+    }()
+	#define SIMPERF_UNPACK_TOKENS(tokens) \
+	[&]() -> std::string { \
+		std::ostringstream os; \
+		for (const auto val : tokens) { \
+		os << typeid(SIMPERF_GEN_ID(, val)).name() << ' ' << val << ": " << SIMPERF_GEN_ID(, val) << std::endl; \
+		} \
+		return os.str(); \
+	}()
 	//need to attach with default error logger
-	#define SIMPERF_INTERNAL_ASSERT_IMPL(type, check, msg, ...) { if(!(check)) { SIMPERF_LOG_ASSERT(msg, __VA_ARGS__); SIMPERF_DEBUGBREAK(); } }
-	#define SIMPERF_INTERNAL_ASSERT_WITH_MSG(type, check, ...) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion failed: {0}", __VA_ARGS__)
-	#define SIMPERF_INTERNAL_ASSERT_NO_MSG(type, check) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}", SIMPERF_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__)
+	#define SIMPERF_INTERNAL_ASSERT_IMPL(type, check, msg, ...) { if(!(check)) { SIMPERF_LOG_ASSERT(msg, __VA_ARGS__); SIMPERF_DEBUGBREAK(msg, __VA_ARGS__); } }
+	#define SIMPERF_INTERNAL_ASSERT_WITH_MSG(type, check, ...) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}\nCause:{3}", SIMPERF_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__, __VA_ARGS__)
+	//#define SIMPERF_INTERNAL_ASSERT_NO_MSG(type, check) SIMPERF_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}", SIMPERF_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__) //toggle wargs
+	#define SIMPERF_INTERNAL_ASSERT_NO_MSGW(type, left, right) std::cout << type << left << ' ' << right << std::endl // WARGS
 
 	#define SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(arg1, arg2, macro, ...) macro
-	#define SIMPERF_INTERNAL_ASSERT_GET_MACRO(...) SIMPERF_EXPAND_MACRO( SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, SIMPERF_INTERNAL_ASSERT_WITH_MSG, SIMPERF_INTERNAL_ASSERT_NO_MSG) )
+	//#define SIMPERF_INTERNAL_ASSERT_GET_MACRO(...) SIMPERF_EXPAND_MACRO( SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, SIMPERF_INTERNAL_ASSERT_WITH_MSG, SIMPERF_INTERNAL_ASSERT_NO_MSG) ) //toggle wargs
+	#define SIMPERF_INTERNAL_ASSERT_GET_MACRO(...) SIMPERF_EXPAND_MACRO( SIMPERF_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, SIMPERF_INTERNAL_ASSERT_WITH_MSG, SIMPERF_INTERNAL_ASSERT_NO_MSGW) ) // WARGS
 
 	#define SIMPERF_ASSERT(...) SIMPERF_EXPAND_MACRO(SIMPERF_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_, __VA_ARGS__) )
+	#define SIMPERF_ASSERT_WARGS(...) SIMPERF_EXPAND_MACRO(SIMPERF_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_, __VA_ARGS__) )
+	//#define SIMPERF_ASSERT_WARGS(...) SIMPERF_UNPACK_TOKENS(SIMPERF_SPLIT_EXPR(SIMPERF_STRINGIFY_MACRO(__VA_ARGS__)))
+	
 #else
-	#define SIMPERF_ASSERT(...) 
+	#define SIMPERF_ASSERT(...)
+	#define SIMPERF_NON(...)
 #endif
 
 	typedef std::shared_ptr<spdlog::logger> logger;
@@ -77,18 +126,18 @@ namespace simperf
 	using namespace std::string_view_literals;
 	constexpr inline std::string_view TestFormat = "Test {} {}."sv;
 
-	template<typename... Args>
-	std::string Format(const std::string_view message, Args... formatItems)
-	{
-		return std::vformat(message, std::make_format_args(std::forward<Args>(formatItems)...));
-	}
-
 	class Log {
 	public:
+
 		template<typename ... Args>
-		static void TestLog(const std::string& logger_name, const std::string_view fmt, Args&&... args) {
-			::simperf::Log::GetLogger(logger_name)->trace(simperf::Format(fmt, std::forward<Args>(args)...));
+		static void LogIt(const std::string& logger_name, const std::string_view fmt, Args... args) {
+			::simperf::Log::GetLogger(logger_name)->trace(std::forward<Args>(args)...);
 		}
+
+		static register_result RegisterFromConfig(const std::filesystem::path& config_path) {
+			return register_result::failed;
+		}
+
 		static register_result RegisterStatic(const log_list& log_list_) {
 			if (!s_StaticRegistryInitialized.load(std::memory_order_acquire)) {
 				std::unique_lock<std::mutex> guard(s_RegisterLock);
@@ -113,14 +162,6 @@ namespace simperf
 			return register_result::ok;
 		}
 
-		static register_result RegisterDynamic(const logger& logger_) {
-			auto result = RegisterLogger(logger_);
-			if (!result) {
-				return register_result::failed;
-			}
-			return register_result::ok;
-		}
-
 		static void Unregister(const std::string& name) {
 			if (s_StaticLoggerRegistry.erase(name)) {
 				spdlog::drop(name);
@@ -131,8 +172,19 @@ namespace simperf
 		}
 
 		static logger GetLogger(const std::string& logger_name) {
-			auto found = s_StaticLoggerRegistry.find(logger_name);
-			return found == s_StaticLoggerRegistry.end() ? spdlog::get(logger_name) : found->second;
+			auto static_found = s_StaticLoggerRegistry.find(logger_name);
+			if (static_found != s_StaticLoggerRegistry.end()) {
+				return static_found->second;
+			}
+			else {
+				auto dynamic_found = spdlog::get(logger_name);
+				if (dynamic_found) {
+					return dynamic_found;
+				}
+				else {
+					return spdlog::default_logger();
+				}
+			}
 		}
 
 		static void SetDebugLogger(const std::string& logger_name) {
@@ -202,6 +254,7 @@ namespace simperf
 
 	#define SIMPERF_LOG_PROFILE(...)			SIMPERF_DEBUG(::simperf::Log::GetDebugLoggerName(), __VA_ARGS__)
 	#define SIMPERF_LOG_ASSERT(...)             SIMPERF_ERROR(::simperf::Log::GetErrorLoggerName(), __VA_ARGS__)
+
 #else
 	#define SIMPERF_TRACE(logger_name, ...)   
 	#define SIMPERF_DEBUG(logger_name, ...)   

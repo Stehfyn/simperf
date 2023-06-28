@@ -16,6 +16,7 @@ project "simperf"
     {
         ".",
         "%{IncludeDir.spdlog}",
+        "%{IncludeDir.spdlog_setup}"
     }
 
     links
