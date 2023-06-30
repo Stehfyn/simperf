@@ -16,10 +16,10 @@ del /q /f /s "tests\*.vcxproj"
 del /q /f /s "tests\*.vcxproj.user"
 del /q /f /s "tests\*.vcxproj.filters"
 
-rmdir /q /s "external\spdlog\build\
+rmdir /q /s external\spdlog\build\
 
-del /q /f /s "bin\"
-del /q /f /s "bin-int\"
+rmdir /q /s bin\
+rmdir /q /s bin-int\
 
 echo %cmdcmdline%|find /i """%~f0""">nul && (
     REM Batchfile was double clicked

@@ -34,7 +34,7 @@ namespace simperf
 	typedef Ref<spdlog::logger> logger;
 	typedef std::vector<logger> log_list;
 
-	void initialize_from_config(const std::filesystem::path& path = {});
+	inline void initialize_from_config(const char* path);
 
 	struct ctx_status
 	{
@@ -70,8 +70,10 @@ namespace simperf
 		inline static std::mutex sm_CtxDataLock;
 	};
 
-	static void initialize_from_config(const std::filesystem::path& path)
+	inline static void initialize_from_config(const char* path)
 	{
 		ctx::Get(); // Initialize ctx
+
+		spdlog_setup::from_file(path); //
 	}
 }

@@ -19,7 +19,7 @@
 
 void make_sinks(std::vector<spdlog::sink_ptr>& sinks)
 {
-	sinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>("yuh"));
+	sinks.emplace_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
 	sinks.emplace_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>("core.log", true));
 
 	sinks[0]->set_pattern("%^[%T] %n: %v%$");
