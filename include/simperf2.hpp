@@ -1,4 +1,5 @@
 #pragma once
+
 #include <string>
 #include <any>
 #include <mutex>
@@ -7,13 +8,20 @@
 #include <iostream>
 #include <sstream>
 #include <type_traits>
-#include <format>
+#include <atomic>
+#include <unordered_map>
+#include <string>
+#include <utility>
+
+
+
 #if defined(SIMPERF_LIB)
 	//#include <spdlog/spdlog.h>
 	//#include <spdlog/common.h>
 	//#include <spdlog/fmt/ostr.h>
 	//#include <spdlog/sinks/basic_file_sink.h>
 	//#include <spdlog/sinks/stdout_color_sinks.h>
+//#define SPDLOG_USE_STD_FORMAT
 	#include <spdlog_setup/conf.h>
 #else
 	#include "../external/spdlog/include/spdlog/spdlog.h"
@@ -24,89 +32,114 @@
 	#include "../external/spdlog_setup/include/spdlog_setup/conf.h"
 #endif
 
-namespace simperf
-{
-#define SIMPERF_STRINGIFY_MACRO(x) #x
-	template<typename T>
-	using Ref = std::shared_ptr<T>;
-	template<typename T, typename ... Args>
+ //typedef Ref<spdlog::logger> logger;
+ //typedef std::vector<logger> log_l
+ //typedef Ref<spdlog::logger> logger;
+ //typedef std::vector<logger> log_list;
 
-	constexpr Ref<T> CreateRef(Args&& ... args)
-	{
-		return std::make_shared<T>(std::forward<Args>(args)...);
-	}
+#pragma once
+#include <string>
+#include <format>
 
-	typedef Ref<spdlog::logger> logger;
-	typedef std::vector<logger> log_list;
-
-	inline void initialize_from_config(const char* path);
-
-	struct ctx_status
-	{
-		bool ok;
+namespace simperf {
+	enum class ProfilingLogSource {
+		FunctionSignature,
+		ScopeValueTracking,
+		ScopeTiming,
 	};
 
-	inline std::ostream& operator<<(std::ostream& os, const ctx_status& status) {
-		os << "is ok: " << status.ok;
-		return os;
-	}
+	enum class AssertionLogSource {
+		ValueCheck,
+		ExplicitNoThrow,
+		VariableNoThrow,
+		Throw
+	};
+
+	using sp_log_level = spdlog::level::level_enum;
+
+	typedef std::unordered_map<ProfilingLogSource, sp_log_level> ProfilingLogTargets;
+	typedef std::unordered_map<AssertionLogSource, sp_log_level> AssertionLogTargets;
+
+	typedef std::pair<ProfilingLogTargets, AssertionLogTargets> DefaultLogTargets;
+
+	std::unordered_map<std::string, DefaultLogTargets> s_LoggerTargets{
+		{"__simperf_default__", {
+			{{ProfilingLogSource::FunctionSignature, sp_log_level::trace},
+			{ProfilingLogSource::ScopeValueTracking, sp_log_level::debug},
+			{ProfilingLogSource::ScopeTiming, sp_log_level::debug}},
+
+			{{AssertionLogSource::ValueCheck, sp_log_level::info},
+			{AssertionLogSource::ExplicitNoThrow, sp_log_level::warn},
+			{AssertionLogSource::VariableNoThrow, sp_log_level::err},
+			{AssertionLogSource::Throw, sp_log_level::critical}}
+			}
+		}
+	};
+}
+
+namespace simperf 
+{
+	inline void default_initialize(void);
+	inline void initialize_from_config(const char* path);
+    inline void initialize_from_log_specs();
 
 	class ctx {
 	public:
-		inline static void Initialize() {
-
+		template <typename T>
+		inline static void LogIt(const std::string& logger_name, 
+			const sp_log_level& log_level, const T& msg)
+		{
+			bool use_default = sm_LogToDefaultLogger.load(std::memory_order_acquire);
+			auto logger = (use_default) ? spdlog::default_logger() : spdlog::get(logger_name);
+			logger->log(log_level, msg);
 		}
 
-		inline static void RegisterStaticLoggers(const log_list& log_list_) {
-			
+		template <typename ... Args>
+		inline static void FormattedLogIt(const std::string& logger_name, 
+			const spdlog::level::level_enum& log_level, const std::string_view fmt, Args... args)
+		{
+			ctx::LogIt(logger_name, log_level, std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
 		}
 
-		inline static const ctx_status Status() {
-			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
-			return sm_Status;
-		}
 		inline static ctx& Get()
 		{
 			static std::unique_ptr<ctx> sm_Instance(new ctx);
 			return *sm_Instance;
 		}
+
 	private:
-		inline static ctx_status sm_Status;
 		inline static std::mutex sm_CtxDataLock;
+		inline static std::atomic_bool sm_LogToDefaultLogger{true};
 	};
 
-	inline static void initialize_from_config(const char* path)
+	inline static void default_initialize(void) 
+	{
+		ctx::Get();
+
+        // do default init
+
+		//we need to log to default spdlog::default_logger()
+    }
+
+	inline static void initialize_from_config(const char* path) 
 	{
 		ctx::Get(); // Initialize ctx
+		spdlog_setup::from_file(path);
+    }
 
-		spdlog_setup::from_file(path); //
+    inline void initialize_from_log_specs() 
+	{
+		ctx::Get();
+
 	}
 
-	// Helper function to extract the type name as a string
-	template <typename T>
-	constexpr const char* type_name() {
-		std::string_view name, prefix, suffix;
-#ifdef __clang__
-		name = __PRETTY_FUNCTION__;
-		prefix = "const char* openai::type_name() [T = ";
-		suffix = "]";
-#elif defined(__GNUC__)
-		name = __PRETTY_FUNCTION__;
-		prefix = "constexpr const char* openai::type_name() [with T = ";
-		suffix = "]";
-#elif defined(_MSC_VER)
-		name = __FUNCSIG__;
-		prefix = "const char *__cdecl openai::type_name<";
-		suffix = ">(void)";
-#endif
-		name.remove_prefix(prefix.size());
-		name.remove_suffix(suffix.size());
-		return name.data();
-	}
+
+
+
 
 	template <typename T, typename = void>
 	struct HasStreamOperator : std::false_type {};
-
+	
 	template <typename T>
 	struct HasStreamOperator<T, std::void_t<decltype(std::declval<std::ostream&>() << std::declval<T>())>> : std::true_type {};
 
