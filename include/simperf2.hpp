@@ -1,6 +1,5 @@
 #pragma once
 
-#include <string>
 #include <any>
 #include <mutex>
 #include <memory>
@@ -12,7 +11,8 @@
 #include <unordered_map>
 #include <string>
 #include <utility>
-
+#include <format>
+#include <array>
 
 
 #if defined(SIMPERF_LIB)
@@ -32,14 +32,8 @@
 	#include "../external/spdlog_setup/include/spdlog_setup/conf.h"
 #endif
 
- //typedef Ref<spdlog::logger> logger;
- //typedef std::vector<logger> log_l
- //typedef Ref<spdlog::logger> logger;
- //typedef std::vector<logger> log_list;
-
-#pragma once
-#include <string>
-#include <format>
+#include "details/log-impl.h"
+#include "details/assert-impl.h"
 
 namespace simperf {
 	enum class ProfilingLogSource {
@@ -62,18 +56,21 @@ namespace simperf {
 
 	typedef std::pair<ProfilingLogTargets, AssertionLogTargets> DefaultLogTargets;
 
-	std::unordered_map<std::string, DefaultLogTargets> s_LoggerTargets{
-		{"__simperf_default__", {
+	DefaultLogTargets get_default_log_targets(void) {
+		return {
 			{{ProfilingLogSource::FunctionSignature, sp_log_level::trace},
 			{ProfilingLogSource::ScopeValueTracking, sp_log_level::debug},
-			{ProfilingLogSource::ScopeTiming, sp_log_level::debug}},
+			{ProfilingLogSource::ScopeTiming,        sp_log_level::debug}},
 
-			{{AssertionLogSource::ValueCheck, sp_log_level::info},
-			{AssertionLogSource::ExplicitNoThrow, sp_log_level::warn},
-			{AssertionLogSource::VariableNoThrow, sp_log_level::err},
-			{AssertionLogSource::Throw, sp_log_level::critical}}
-			}
-		}
+			{{AssertionLogSource::ValueCheck,        sp_log_level::info},
+			{AssertionLogSource::ExplicitNoThrow,    sp_log_level::warn},
+			{AssertionLogSource::VariableNoThrow,    sp_log_level::err},
+			{AssertionLogSource::Throw,              sp_log_level::critical}}
+		};
+	}
+
+	std::unordered_map<std::string, DefaultLogTargets> s_LoggerTargets{
+		{"simperf", get_default_log_targets() }
 	};
 }
 
@@ -91,6 +88,7 @@ namespace simperf
 		{
 			bool use_default = sm_LogToDefaultLogger.load(std::memory_order_acquire);
 			auto logger = (use_default) ? spdlog::default_logger() : spdlog::get(logger_name);
+			assert(logger != nullptr);
 			logger->log(log_level, msg);
 		}
 
@@ -99,6 +97,12 @@ namespace simperf
 			const spdlog::level::level_enum& log_level, const std::string_view fmt, Args... args)
 		{
 			ctx::LogIt(logger_name, log_level, std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
+		}
+		template <typename ... Args>
+		inline static void AutoFormattedLogIt(const std::string& logger_name,
+			const spdlog::level::level_enum& log_level, const std::string_view fmt, Args... args)
+		{
+
 		}
 
 		inline static ctx& Get()
@@ -112,13 +116,28 @@ namespace simperf
 		inline static std::atomic_bool sm_LogToDefaultLogger{true};
 	};
 
+	inline void rename_default_logger(const char* new_name)
+	{
+		// Replace default_logger name.
+		auto old_default_logger = spdlog::default_logger();
+		auto new_default_logger = old_default_logger->clone(new_name);
+		spdlog::set_default_logger(new_default_logger);
+	}
+
 	inline static void default_initialize(void) 
 	{
 		ctx::Get();
 
-        // do default init
+		//we need to rename default logger
+		rename_default_logger("simperf");
 
-		//we need to log to default spdlog::default_logger()
+		auto file_log = std::make_shared<spdlog::sinks::basic_file_sink_st>("simperf.log");
+
+		spdlog::default_logger()->sinks().push_back(file_log);
+
+		spdlog::default_logger()->set_level(sp_log_level::trace);
+		spdlog::default_logger()->flush_on(sp_log_level::trace);
+
     }
 
 	inline static void initialize_from_config(const char* path) 
@@ -132,6 +151,8 @@ namespace simperf
 		ctx::Get();
 
 	}
+
+	
 
 
 

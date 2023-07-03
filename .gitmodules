@@ -6,3 +6,6 @@
 	path = external/spdlog_setup
 	url = https://github.com/Stehfyn/spdlog_setup
 	ignore = dirty
+[submodule "external/compile-time-regular-expressions"]
+	path = external/compile-time-regular-expressions
+	url = https://github.com/hanickadot/compile-time-regular-expressions

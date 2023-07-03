@@ -2,10 +2,6 @@
 #include <mutex>
 #include <condition_variable>
 
-void test_initialize() {
-	::simperf::initialize_from_config("log.conf");
-}
-
 std::mutex m;
 std::condition_variable cv;
 std::string data;
@@ -15,7 +11,7 @@ bool processed = false;
 void worker_thread()
 {
     using namespace std::chrono_literals;
-    
+
     SIMPERF_PROFILE_FUNCTION(ready, processed, data);
 
     auto logger = spdlog::get("test");
@@ -41,11 +37,10 @@ void worker_thread()
     cv.notify_one();
 }
 
-int main()
-{
+void test_mt() {
+    
+	::simperf::initialize_from_config("log.conf");
     SIMPERF_PROFILE_BEGIN_SESSION("test", "test-session.json");
-
-    test_initialize();
 
     std::thread worker(worker_thread);
     auto logger = spdlog::get("test");
@@ -67,7 +62,29 @@ int main()
 
     worker.join();
     logger->trace("Back in main(), data = {0}:", data);
-
+    simperf::ctx::FormattedLogIt("", spdlog::level::level_enum::critical, "{0} {1} {2}", 0, 1, 2);
+    simperf::ctx::LogIt("", spdlog::level::level_enum::critical, "Hello :)");
     SIMPERF_PROFILE_END_SESSION();
+}
+
+void test_st()
+{
+    ::simperf::default_initialize();
+    simperf::ctx::FormattedLogIt("", spdlog::level::level_enum::trace, "{0} {1} {2}", 0, 1, 2);
+    simperf::ctx::LogIt("", spdlog::level::level_enum::trace, "Hello :)");
+    SIMPERF_TRACE("simperf", "hi");
+}
+
+void test_assert()
+{
+    int x = 1;
+    int y = 1;
+    SIMPERF_ASSERT_NEQ(1, 1, "simperf", "1 equals 1!", x, y);
+}
+
+int main()
+{
+    test_st();
+    test_assert();
     return 0;
 }
