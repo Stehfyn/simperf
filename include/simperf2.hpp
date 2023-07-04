@@ -13,8 +13,10 @@
 #include <utility>
 #include <format>
 #include <array>
-
-
+#include <functional>
+#include <variant>
+#include <source_location>
+#include <windows.h>
 #if defined(SIMPERF_LIB)
 	//#include <spdlog/spdlog.h>
 	//#include <spdlog/common.h>
@@ -23,6 +25,7 @@
 	//#include <spdlog/sinks/stdout_color_sinks.h>
 //#define SPDLOG_USE_STD_FORMAT
 	#include <spdlog_setup/conf.h>
+	//#include <spdlog/fmt/bundled/color.h>
 #else
 	#include "../external/spdlog/include/spdlog/spdlog.h"
 	#include "../external/spdlog/include/spdlog/common.h"
@@ -31,48 +34,11 @@
 	#include "../external/spdlog/include/spdlog/sinks/stdout_color_sinks.h"
 	#include "../external/spdlog_setup/include/spdlog_setup/conf.h"
 #endif
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/bundled/color.h>
 
 #include "details/log-impl.h"
 #include "details/assert-impl.h"
-
-namespace simperf {
-	enum class ProfilingLogSource {
-		FunctionSignature,
-		ScopeValueTracking,
-		ScopeTiming,
-	};
-
-	enum class AssertionLogSource {
-		ValueCheck,
-		ExplicitNoThrow,
-		VariableNoThrow,
-		Throw
-	};
-
-	using sp_log_level = spdlog::level::level_enum;
-
-	typedef std::unordered_map<ProfilingLogSource, sp_log_level> ProfilingLogTargets;
-	typedef std::unordered_map<AssertionLogSource, sp_log_level> AssertionLogTargets;
-
-	typedef std::pair<ProfilingLogTargets, AssertionLogTargets> DefaultLogTargets;
-
-	DefaultLogTargets get_default_log_targets(void) {
-		return {
-			{{ProfilingLogSource::FunctionSignature, sp_log_level::trace},
-			{ProfilingLogSource::ScopeValueTracking, sp_log_level::debug},
-			{ProfilingLogSource::ScopeTiming,        sp_log_level::debug}},
-
-			{{AssertionLogSource::ValueCheck,        sp_log_level::info},
-			{AssertionLogSource::ExplicitNoThrow,    sp_log_level::warn},
-			{AssertionLogSource::VariableNoThrow,    sp_log_level::err},
-			{AssertionLogSource::Throw,              sp_log_level::critical}}
-		};
-	}
-
-	std::unordered_map<std::string, DefaultLogTargets> s_LoggerTargets{
-		{"simperf", get_default_log_targets() }
-	};
-}
 
 namespace simperf 
 {
@@ -105,6 +71,16 @@ namespace simperf
 
 		}
 
+		inline static bool VariableShouldThrow(void)
+		{
+			return sm_VariableNoThrowActive.load(std::memory_order_acquire);
+		}
+
+		inline static void SetVariableShouldThrowOn(bool flag = false)
+		{
+			sm_VariableNoThrowActive.store(flag, std::memory_order_release);
+		}
+
 		inline static ctx& Get()
 		{
 			static std::unique_ptr<ctx> sm_Instance(new ctx);
@@ -114,6 +90,7 @@ namespace simperf
 	private:
 		inline static std::mutex sm_CtxDataLock;
 		inline static std::atomic_bool sm_LogToDefaultLogger{true};
+		inline static std::atomic_bool sm_VariableNoThrowActive{false};
 	};
 
 	inline void rename_default_logger(const char* new_name)
@@ -122,6 +99,7 @@ namespace simperf
 		auto old_default_logger = spdlog::default_logger();
 		auto new_default_logger = old_default_logger->clone(new_name);
 		spdlog::set_default_logger(new_default_logger);
+		
 	}
 
 	inline static void default_initialize(void) 
@@ -137,7 +115,6 @@ namespace simperf
 
 		spdlog::default_logger()->set_level(sp_log_level::trace);
 		spdlog::default_logger()->flush_on(sp_log_level::trace);
-
     }
 
 	inline static void initialize_from_config(const char* path) 

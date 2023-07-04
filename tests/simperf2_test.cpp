@@ -1,3 +1,4 @@
+#define SIMPERF_ENABLE
 #include "../include/simperf2.hpp"
 #include <mutex>
 #include <condition_variable>
@@ -70,6 +71,7 @@ void test_mt() {
 void test_st()
 {
     ::simperf::default_initialize();
+    
     simperf::ctx::FormattedLogIt("", spdlog::level::level_enum::trace, "{0} {1} {2}", 0, 1, 2);
     simperf::ctx::LogIt("", spdlog::level::level_enum::trace, "Hello :)");
     SIMPERF_TRACE("simperf", "hi");
@@ -79,12 +81,42 @@ void test_assert()
 {
     int x = 1;
     int y = 1;
-    SIMPERF_ASSERT_NEQ(1, 1, "simperf", "1 equals 1!", x, y);
+
+#ifdef _DEBUG
+    ::simperf::ctx::SetVariableShouldThrowOn(true);
+#else
+    ::simperf::ctx::SetVariableShouldThrowOn(false);
+#endif
+
+    SIMPERF_ASSERT_NEQ_NO_THROW(69, 69, "simperf", "ASSERT 69 equals 69!", x, y);
+    //SIMPERF_ASSERT_NEQ_VARIABLE_THROW(96, 96, "simperf", "96 equals 96! {} {}", x, y);
+    //SIMPERF_ASSERT_NEQ(1, 1, "simperf", "1 equals 1!", x, y);
+
+    std::string tesst("hello");
+    auto ss = ::simperf::SmartString("hello");
+    auto ss2 = ::simperf::SmartString(tesst);
+
+    auto ams = ::simperf::AssertionMsgSpec();
+    
+    simperf::ctx::FormattedLogIt("", spdlog::level::level_enum::warn, 
+        ams.m_MsgPrefix.val, "\"a==b\"", std::source_location::current().line(), 
+        std::source_location::current().file_name());
+
+    auto a = ::simperf::Assertion(ss != ss2, ss, ss2);
+    //std::cout << a.ShouldThrow() << std::endl;
+    //auto ams = ::simperf::AssertionMsgSpec("hi", tesst, "hello");
+    //auto ss = ::simperf::SmartString(tesst.data());
 }
 
 int main()
 {
     test_st();
-    test_assert();
+    try {
+        test_assert();
+    }
+    catch (std::exception& e) {
+        auto logger = spdlog::get("simperf");
+        logger->warn("exception caught");
+    }
     return 0;
 }
