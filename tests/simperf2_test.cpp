@@ -8,7 +8,8 @@ std::condition_variable cv;
 std::string data;
 bool ready = false;
 bool processed = false;
-
+#define TEST_ASSERT(check, left, right) auto a = ::simperf::Assertion(left != right, left, right, ::simperf::make_array(std::string("simperf"))); if (a) { SIMPERF_DEBUGBREAK(); }
+#define TEST_ASSERT2(check, left, right) auto a2 = ::simperf::Assertion(left != right, left, right); if (a2) { SIMPERF_DEBUGBREAK(); }
 void worker_thread()
 {
     using namespace std::chrono_literals;
@@ -92,20 +93,30 @@ void test_assert()
     //SIMPERF_ASSERT_NEQ_VARIABLE_THROW(96, 96, "simperf", "96 equals 96! {} {}", x, y);
     //SIMPERF_ASSERT_NEQ(1, 1, "simperf", "1 equals 1!", x, y);
 
-    std::string tesst("hello");
+    std::string test_str("hello");
     auto ss = ::simperf::SmartString("hello");
-    auto ss2 = ::simperf::SmartString(tesst);
-
+    auto ss2 = ::simperf::SmartString(test_str);
+    auto ss3 = ::simperf::SmartString(std::string_view("string_view of char lit to smart str to string :)"));
     auto ams = ::simperf::AssertionMsgSpec();
-    
+
+    std::string constexpr_test;
+    for (int i = 0; i < 10; ++i) {
+        constexpr_test.push_back(62 + i);
+    }
+	::simperf::ctx::AddTag("simperf");
+	::simperf::ctx::AddTag(std::string("simperf1"));
+	::simperf::ctx::AddTag(ss);
+	::simperf::ctx::AddTag(ss3);
+	::simperf::ctx::AddTag(test_str + "ur mom");
+
     simperf::ctx::FormattedLogIt("", spdlog::level::level_enum::warn, 
         ams.m_MsgPrefix.val, "\"a==b\"", std::source_location::current().line(), 
         std::source_location::current().file_name());
 
-    auto a = ::simperf::Assertion(ss != ss2, ss, ss2);
-    //std::cout << a.ShouldThrow() << std::endl;
-    //auto ams = ::simperf::AssertionMsgSpec("hi", tesst, "hello");
-    //auto ss = ::simperf::SmartString(tesst.data());
+	//TEST_ASSERT(ss != ss2, ss, ss2);
+	//TEST_ASSERT2(ss != ss2, ss, ss2);
+    ::simperf::ctx::SetAssertionTypeStatus(::simperf::AssertionType::Fatal, false);
+    auto a3 = ::simperf::Assertion(ss != ss2, ss, ss2, ::simperf::make_array(constexpr_test, "hi", test_str.c_str(), R"(literl)"));
 }
 
 int main()
@@ -113,6 +124,9 @@ int main()
     test_st();
     try {
         test_assert();
+		for (const auto& tag : ::simperf::ctx::Tags()) {
+			std::cout << "tag: " << tag << std::endl;
+		}
     }
     catch (std::exception& e) {
         auto logger = spdlog::get("simperf");

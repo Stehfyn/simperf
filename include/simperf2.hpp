@@ -16,7 +16,10 @@
 #include <functional>
 #include <variant>
 #include <source_location>
+#include <stack>
+#include <array>
 #include <windows.h>
+
 #if defined(SIMPERF_LIB)
 	//#include <spdlog/spdlog.h>
 	//#include <spdlog/common.h>
@@ -64,6 +67,7 @@ namespace simperf
 		{
 			ctx::LogIt(logger_name, log_level, std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
 		}
+
 		template <typename ... Args>
 		inline static void AutoFormattedLogIt(const std::string& logger_name,
 			const spdlog::level::level_enum& log_level, const std::string_view fmt, Args... args)
@@ -81,18 +85,96 @@ namespace simperf
 			sm_VariableNoThrowActive.store(flag, std::memory_order_release);
 		}
 
-		inline static ctx& Get()
+		inline static ctx& Initialize()
 		{
+			static void* sm_Initialized(nullptr);
+			assert(sm_Initialized == nullptr);
 			static std::unique_ptr<ctx> sm_Instance(new ctx);
+			_Initialize();
+			sm_Initialized = static_cast<void*>(&sm_Instance);
 			return *sm_Instance;
 		}
 
+		inline static std::vector<std::string_view> Tags(void) {
+			std::vector<std::string_view> tags;
+			for (const auto& kv : sm_TagStatusMap) {
+				tags.push_back(kv.first.val);
+			}
+			return tags;
+		}
+
+		template <typename T>
+		inline static void AddTag(const T& tag, bool enabled = true) {
+			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
+			sm_TagStatusMap.insert({ InstrumentTag(tag), enabled});
+		}
+
+		inline static std::string_view GetDefaultTag(void) {
+			return sm_DefaultTag.val;
+		}
+
+		inline static void SetAssertionTypeStatus(const AssertionType& type, bool enabled = true) {
+			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
+			auto it = sm_AssertionTypeStatusMap.find(type);
+			assert(it != sm_AssertionTypeStatusMap.end());
+			it->second = enabled;
+		}
+
+		inline static bool GetAssertionTypeStatus(const AssertionType& type) {
+			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
+			auto it = sm_AssertionTypeStatusMap.find(type);
+			assert(it != sm_AssertionTypeStatusMap.end());
+			return it->second;
+		}
+
+		template <typename T>
+		inline static void SetInstrumentTagStatus(const T& tag, bool enabled = true) {
+			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
+			auto it = sm_TagStatusMap.find(InstrumentTag(tag));
+			assert(it != sm_TagStatusMap.end());
+			it->second = enabled;
+		}
+
+		template<typename T>
+		inline static bool GetInstrumentTagStatus(const T& tag) {
+			std::unique_lock<std::mutex> guard(sm_CtxDataLock);
+			auto it = sm_TagStatusMap.find(InstrumentTag(tag));
+			assert(it != sm_TagStatusMap.end());
+			return it->second;
+		}
+
+		void SetGlobalAssertionStatus(bool enabled = true) {
+			sm_VariableNoThrowActive.store(enabled, std::memory_order_release);
+		}
+
+		inline static bool GetGlobalAssertionStatus(void) {
+			return sm_VariableNoThrowActive.load(std::memory_order_acquire);
+		}
+
 	private:
+		inline static void _Initialize(void) {
+			sm_AssertionTypeStatusMap = {{ AssertionType::ExplicitNoThrow, true },
+										 { AssertionType::VariableThrow, true } ,
+										 { AssertionType::Throw, true },
+										 { AssertionType::Fatal, true }};
+		}
+	private:
+		inline static InstrumentTag sm_DefaultTag{ "simperf" };
+		
 		inline static std::mutex sm_CtxDataLock;
 		inline static std::atomic_bool sm_LogToDefaultLogger{true};
 		inline static std::atomic_bool sm_VariableNoThrowActive{false};
+
+		inline static std::stack<LoggerTag> sm_LoggerTagStack;
+		inline static std::stack<InstrumentTag> sm_InstrumentTagStack;
+
+		inline static std::atomic_bool sm_GlobalAssertionSwitch{true};
+		inline static std::unordered_map<AssertionType, bool> sm_AssertionTypeStatusMap;
+		inline static std::unordered_map<InstrumentTag, 
+			bool, std::hash<InstrumentTag>> sm_TagStatusMap;
 	};
 
+#pragma region inlinehelpers
 	inline void rename_default_logger(const char* new_name)
 	{
 		// Replace default_logger name.
@@ -104,7 +186,7 @@ namespace simperf
 
 	inline static void default_initialize(void) 
 	{
-		ctx::Get();
+		ctx::Initialize();
 
 		//we need to rename default logger
 		rename_default_logger("simperf");
@@ -119,22 +201,169 @@ namespace simperf
 
 	inline static void initialize_from_config(const char* path) 
 	{
-		ctx::Get(); // Initialize ctx
+		ctx::Initialize(); // Initialize ctx
 		spdlog_setup::from_file(path);
     }
 
     inline void initialize_from_log_specs() 
 	{
-		ctx::Get();
+		ctx::Initialize();
 
 	}
+#pragma endregion inlinehelpers
 
+
+	
+#pragma region Assertions
+	template <typename T1 = std::string_view,
+		typename T2 = std::string_view, typename T3 = std::string_view>
+	struct AssertionMsgSpec {
+		SmartString<T1> m_Msg;
+		SmartString<T2> m_MsgPrefix;
+		SmartString<T3> m_Expression;
+
+		AssertionMsgSpec(const T1& msg, const T2& msg_prefix, const T3& expression) :
+			m_Msg(msg), m_MsgPrefix(msg_prefix), m_Expression(expression)
+		{
+		}
+
+		AssertionMsgSpec(std::string_view msg = ASSERT_FMTMSG,
+			std::string_view msg_prefix = ASSERT_PREFIX, std::string_view expression = "") :
+			m_Msg(msg), m_MsgPrefix(msg_prefix), m_Expression(expression)
+		{
+		}
+	};
+
+	template <typename T1 = std::string_view,
+		typename T2 = std::string_view, typename T3 = std::string_view>
+	AssertionMsgSpec(const T1& msg, const T2& msg_prefix, const T3& expression)
+		->AssertionMsgSpec<T1, T2, T3>;
+
+	template <typename T1 = std::any, typename T2 = std::any>
+	struct AssertionSpec {
+		AssertionType Type;
+		AssertionMsgSpec<> MsgSpec;
+		AssertionControlFlags ControlFilter;
+		AssertionLogLevelTargets LogLevelTargets;
+		std::function<bool(T1, T2)> Override;
+
+		AssertionSpec(AssertionType type = AssertionType::Fatal,
+			AssertionControlFlags control_filter = AssertionControlFlags::Global |
+			AssertionControlFlags::Type | AssertionControlFlags::Tag,
+			AssertionMsgSpec<> msg_spec = {},
+			AssertionLogLevelTargets log_level_targets = get_default_assertion_log_level_targets(),
+			std::function<bool(T1, T2)> _override =
+			[](const T1& lhs, const T2& rhs) -> bool { return false; })
+			: Type(type), ControlFilter(control_filter), LogLevelTargets(log_level_targets),
+			Override(_override)
+		{
+		}
+	};
+
+	template <typename T1 = std::any, typename T2 = std::any>
+	AssertionSpec(AssertionType, AssertionControlFlags, AssertionLogLevelTargets,
+		std::function<bool(T1, T2)>)
+		->AssertionSpec<T1, T2>;
+
+	template <size_t N>
+	class AssertionBase {
+	public:
+		explicit operator bool() const {
+			//m_AssertionSpec.
+			return !m_Check;
+		}
+
+		void Flush() {
+
+		}
+
+		~AssertionBase() {
+			auto logger = spdlog::get("simperf");
+			logger->warn("assertion destructor called");
+		}
+
+	protected:
+		AssertionBase(bool check = false, 
+			std::array<SmartString<std::string>, N> tags = make_array(std::string(::simperf::ctx::GetDefaultTag())),
+			AssertionSpec<> spec = {}) :
+			m_Check(check), m_FailedCheck(false), m_Tags(tags), m_AssertionSpec(spec)
+		{
+			using acf = AssertionControlFlags;
+
+			if (!check) {
+				if (!!(m_AssertionSpec.ControlFilter & acf::Override)) {
+					//m_FailedCheck = m_AssertionSpec.Override();
+					m_FailedCheck = true;
+				}
+
+				else if (!!(m_AssertionSpec.ControlFilter & acf::Global)) {
+					if (::simperf::ctx::GetGlobalAssertionStatus()) {
+						bool listens_to_type = !!(m_AssertionSpec.ControlFilter & acf::Type);
+						bool listens_to_tag =  !!(m_AssertionSpec.ControlFilter & acf::Tag);
+
+						if (listens_to_type && listens_to_tag) {
+							//check if type is active
+							bool type_is_active = 
+								::simperf::ctx::GetAssertionTypeStatus(m_AssertionSpec.Type);
+
+							//bool tags_are_active = true;
+							m_FailedCheck = type_is_active;
+						}
+					}
+
+
+					//check if asserts are globally active
+					//check if this type of assert is active
+					//check if asserts with this tag are active
+				}
+			}
+		}
+
+		std::function<bool()> m_ThrowIf;
+		std::string m_Logger;
+
+		AssertionSpec<> m_AssertionSpec;
+		std::source_location m_SourceLocation;
+		std::array<SmartString<std::string>, N> m_Tags;
+
+	private:
+		bool m_Check;
+		bool m_FailedCheck;
+	};
+
+	template <size_t N>
+	AssertionBase(bool, std::array<SmartString<std::string>, N>, AssertionSpec<>)->AssertionBase<N>;
+
+	template <typename T1, typename T2, size_t N>
+	class Assertion : public AssertionBase<N> {
+	public:
+		Assertion(bool check, const T1& lhs, const T2& rhs, std::array<SmartString<std::string>, N> tags =
+			make_array(std::string(::simperf::ctx::GetDefaultTag())), AssertionSpec<> spec = {},
+			std::source_location source_loc = std::source_location::current())
+			: AssertionBase<N>(check, tags, spec)
+		{
+		}
+	};
+
+	template <typename T1, typename T2, size_t N>
+	Assertion(bool check, const T1& lhs, const T2& rhs, std::array<SmartString<std::string>, N> tags =
+		make_array(std::string(::simperf::ctx::GetDefaultTag())),
+		AssertionSpec<T1, T2> spec = {}, std::source_location source_loc =
+		std::source_location::current())->Assertion<T1, T2, N>;
+
+	template <typename T1, typename T2>
+	Assertion(bool check, const T1& lhs, const T2& rhs)->Assertion<T1, T2, 1>;
+
+#pragma endregion Assertions
+
+	//template <typename T, typename... Ts>
+	//constexpr std::array<T, 1 + sizeof...(Ts)> make_array(T&& first, Ts&&... args) {
+	//	return std::array<T, 1 + sizeof...(Ts)>{std::forward<T>(first), std::forward<Ts>(args)...};
+	//}
 	
 
 
-
-
-
+#pragma region profiling
 	template <typename T, typename = void>
 	struct HasStreamOperator : std::false_type {};
 	
@@ -413,4 +642,6 @@ namespace simperf
 #define SIMPERF_PROFILE_SCOPE(name)
 #define SIMPERF_PROFILE_FUNCTION()
 #endif
+
 }
+#pragma endregion profiling
